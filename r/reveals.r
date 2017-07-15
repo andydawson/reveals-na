@@ -6,6 +6,53 @@ library(ggplot2)
 # load('DISQOVER/R/sysdata.rda')
 source('DISQOVER/R/main.R')
 
+##################################################################################################################################################
+## pulle pollen data for NA
+##################################################################################################################################################
+library(dplyr)
+library(neotoma)
+
+if(!'na_downloads.rds' %in% list.files('data/cache/')) {
+  canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
+  usa <-  get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
+
+  na_pollen <- bind(canada, usa)
+
+  saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
+} else {
+  na_pollen <- readRDS('data/cache/na_downloads.rds')
+}
+
+if(!'ena_downloads.rds' %in% list.files('data/cache/')) {
+  ena <- get_dataset(locs=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
+  ena_pollen <- bind(canada, usa)
+  
+  saveRDS(ena_pollen, file = 'data/cache/ena_downloads.rds')
+} else {
+  ena_pollen <- readRDS('data/cache/ena_downloads.rds')
+}
+
+
+na_stepps <- compile_taxa()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # read in pollen site meta data
 # meta   = read.csv('data/site_meta.csv') # do we need this? don't think so
 # counts = read.csv('data/sediment_ages_v1.0_varves.csv')
