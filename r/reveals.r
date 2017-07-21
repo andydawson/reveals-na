@@ -6,15 +6,19 @@ library(ggplot2)
 # load('DISQOVER/R/sysdata.rda')
 source('DISQOVER/R/main.R')
 
+ena=TRUE
+
 ##################################################################################################################################################
 ## pulle pollen data for NA
 ##################################################################################################################################################
 library(dplyr)
 library(neotoma)
+devtools::install_github("PalEON-Project/stepps-cal")
+library(stepps)
 
 if(!'na_downloads.rds' %in% list.files('data/cache/')) {
   canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
-  usa <-  get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
+  usa    <- get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
 
   na_pollen <- bind(canada, usa)
 
@@ -24,19 +28,42 @@ if(!'na_downloads.rds' %in% list.files('data/cache/')) {
 }
 
 if(!'ena_downloads.rds' %in% list.files('data/cache/')) {
-  ena <- get_dataset(locs=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
-  ena_pollen <- bind(canada, usa)
+  ena_pollen <- get_dataset(loc=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
+  # ena_pollen <- bind(canada, usa)
   
   saveRDS(ena_pollen, file = 'data/cache/ena_downloads.rds')
 } else {
   ena_pollen <- readRDS('data/cache/ena_downloads.rds')
 }
 
+if (ena) {
+  datasets = ena_pollen
+} else {
+  datasets = na_pollen
+}
 
-na_stepps <- compile_taxa()
+# calib_dialect <- pull_timebins(downloads, calib_range = c(150, 350))
+pollen_dialect <- compile_downloads(ena_pollen)
+
+# # compile the pollen taxa
+# generate_tables(na_pollen, output = 'data/pol_trans.csv')
+
+# for now
+pol_trans_edited <- read.csv('data/pol_trans_edited.csv')
+
+# translate taxa
+pollen_trans <- translate_taxa(pollen_dialect, 
+                              pol_trans_edited,
+                              id_cols = colnames(pollen_dialect)[1:10])
+
+# lake sizes
 
 
-
+# make grid for NA (or ENA)
+library(raster)
+library(sp)
+grid <- make_grid(pollen_trans, coord_fun = ~ long + lat, projection = '+init=epsg:4326', resolution = 1)
+  
 
 
 
