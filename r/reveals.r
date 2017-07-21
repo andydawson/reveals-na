@@ -4,13 +4,16 @@ library(ggplot2)
 
 # # load package
 # load('DISQOVER/R/sysdata.rda')
+
 source('DISQOVER/R/main.R')
+source('generate_tables.R')
 
 ##################################################################################################################################################
 ## pulle pollen data for NA
 ##################################################################################################################################################
 library(dplyr)
 library(neotoma)
+library(stepps)
 
 if(!'na_downloads.rds' %in% list.files('data/cache/')) {
   canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
@@ -20,22 +23,22 @@ if(!'na_downloads.rds' %in% list.files('data/cache/')) {
 
   saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
 } else {
-  na_pollen <- readRDS('data/cache/na_downloads.rds')
+  na_pollen <- readRDS('data/cache/ena_downloads.rds')
 }
 
 if(!'ena_downloads.rds' %in% list.files('data/cache/')) {
-  ena <- get_dataset(locs=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
-  ena_pollen <- bind(canada, usa)
   
-  saveRDS(ena_pollen, file = 'data/cache/ena_downloads.rds')
+  ena <- get_dataset(loc=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
+  
+  saveRDS(ena, file = '../data/cache/ena_downloads.rds')
+  
 } else {
-  ena_pollen <- readRDS('data/cache/ena_downloads.rds')
+  ena_pollen <- readRDS('../data/cache/ena_downloads.rds')
 }
 
+ena_taxa <- lapply(taxa(ena_pollen, collapse = FALSE), as.data.frame) %>% bind_rows
 
-na_stepps <- compile_taxa()
-
-
+generate_tables(ena_pollen, output = 'things.csv')
 
 
 
