@@ -12,6 +12,6 @@ make_grid <- function(pollen, coord_fun = ~ x + y, projection = '+init=epsg:3175
                              resolution = 1,
                              crs = CRS('+init=epsg:4326'))
 
-  raster::setValues(out_rast) <- 1:ncell(out_rast)
+  out_rast <- raster::setValues(out_rast, 1:ncell(out_rast))
   return(out_rast)
 }
