@@ -15,33 +15,29 @@ source('DISQOVER/R/main.R')
 ena <- TRUE
 
 ##################################################################################################################################################
-## pulle pollen data for NA
+## pull pollen data for NA
 ##################################################################################################################################################
 
 if(!'na_downloads.rds' %in% list.files('data/cache/')) {
   canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
   usa    <- get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
-
   na_pollen <- bind(canada, usa)
 
   saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
 } else {
-  na_pollen <- readRDS('data/cache/ena_downloads.rds')
+  na_pollen <- readRDS('data/cache/na_downloads.rds')
 }
 
 if(!'ena_downloads.rds' %in% list.files('data/cache/')) {
-
   ena <- get_dataset(loc=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
-  
   saveRDS(ena, file = 'data/cache/ena_downloads.rds')
-  
 } else {
-  ena_pollen <- readRDS('../data/cache/ena_downloads.rds')
+  ena_pollen <- readRDS('data/cache/ena_downloads.rds')
 }
 
-ena_taxa <- lapply(taxa(ena_pollen, collapse = FALSE), as.data.frame) %>% bind_rows
+# ena_taxa <- lapply(taxa(ena_pollen, collapse = FALSE), as.data.frame) %>% bind_rows
 
-generate_tables(ena_pollen, output = 'things.csv')
+# generate_tables(ena_pollen, output = 'things.csv')
 
 if (ena) {
   datasets = ena_pollen
@@ -63,32 +59,36 @@ pollen_trans <- translate_taxa(pollen_dialect,
                               pol_trans_edited,
                               id_cols = colnames(pollen_dialect)[1:10])
 
-# lake sizes
-
-
 # make grid for NA (or ENA)
 source('r/make_grid.R')
 grid <- make_grid(pollen_trans, coord_fun = ~ long + lat, projection = '+init=epsg:4326', resolution = 1)
   
-cells <- extract(grid, pollen_dialect[,c('long', 'lat')])
+cell_id <- extract(grid, pollen_trans[,c('long', 'lat')])
 
-pollen_dialect <- data.frame(cells, pollen_dialect)
+pollen_trans <- data.frame(cell_id, pollen_trans)
+
+# lake sizes
+lake_sizes = read.csv('data/areas_with_datasetID.csv')
+lake_sizes = lake_sizes[!duplicated(lake_sizes$DatasetID),] 
+
+lake_size = lake_sizes$AREAHA[match(pollen_trans$dataset, lake_sizes$DatasetID)]
+lake_size[which(is.na(lake_size))] = lake_sizes$Area[match(pollen_trans$dataset[which(is.na(lake_size))], lake_sizes$DatasetID)]
+
+library(truncnorm)
+lake_size[which(is.na(lake_size))] = rtruncnorm(length(which(is.na(lake_size))), 
+                                                  a=0, 
+                                                  mean=mean(lake_size, na.rm=TRUE), 
+                                                  sd=sd(lake_size, na.rm=TRUE))
+
+# in HA; convert to radius in m
+# pi * r * r
+lake_size = sqrt(lake_size*0.01 / pi)*1000
+pollen_trans <- data.frame(lake_size, pollen_trans)
 
 
-
-
-
-
-
-
-
-
-
-# read in pollen site meta data
-# meta   = read.csv('data/site_meta.csv') # do we need this? don't think so
-# counts = read.csv('data/sediment_ages_v1.0_varves.csv')
-
-load('data/input.rdata')
+##################################################################################################################################################
+## read in and prep ppes and svs
+##################################################################################################################################################
 
 # read in PPEs
 ppes = read.csv('data/ppes_v2.csv', sep=',', header=TRUE, stringsAsFactors=FALSE)
@@ -99,8 +99,6 @@ ppes = read.csv('data/ppes_v2.csv', sep=',', header=TRUE, stringsAsFactors=FALSE
 maple_rescale = mean(ppes[which((ppes$taxon=='MAPLE')&(ppes$continent == 'North America')&(ppes$tag != 'calcote')),'ppe'])
 ppes[which(ppes$tag == 'calcote'),'ppe'] = ppes[which(ppes$tag == 'calcote'),'ppe']*0.61
 
-ggplot(data=subset(ppes, continent == 'North America')) + geom_point(aes(x=ppe, y=taxon))
-
 ppes_agg = aggregate(ppe ~ taxon + continent, ppes, function(x) quantile(x, c(0.05, 0.5, 0.95)))
 ppes_sd = aggregate(ppe ~ taxon + continent, ppes, function(x) sd(x))
 ppes_sd[which(is.na(ppes_sd$ppe)), 'ppe'] = 0.01
@@ -109,11 +107,13 @@ ppes_agg_NA = subset(ppes_agg, continent == 'North America')
 
 ggplot(data=ppes_agg_NA) + geom_point(aes(x=ppe[,2], y=reorder(taxon, ppe[,2])))
 
-# read in STEPPS PPEs
-ppe_stepps = readRDS('data/ppe_post.RDS')
-# ppe_stepps = readRDS('data/ppe_stepps.RDS')
-ppe_stepps_ref = t(apply(ppe_stepps, 1, function(x) x/x[10]))
-ppe_stepps_stat  = data.frame(taxa, t(apply(ppe_stepps_ref, 2, function(x) c(mean(x), sd(x)))))
+taxa = unique(ppes_agg_NA$taxon)
+
+# # read in STEPPS PPEs
+# ppe_stepps = readRDS('data/ppe_post.RDS')
+# # ppe_stepps = readRDS('data/ppe_stepps.RDS')
+# ppe_stepps_ref = t(apply(ppe_stepps, 1, function(x) x/x[10]))
+# ppe_stepps_stat  = data.frame(taxa, t(apply(ppe_stepps_ref, 2, function(x) c(mean(x), sd(x)))))
 
 # read in SVs
 svs = read.csv('data/svs_meta3.csv', sep=',', header=TRUE, stringsAsFactors=FALSE)
@@ -132,15 +132,11 @@ rownames(reveals_inputs) = NULL
 #                             PPEs=ppe_stepps_stat[,2], 
 #                             PPE.errors=ppe_stepps_stat[,3])
 # rownames(reveals_inputs) = NULL
-write.csv(reveals_inputs, "revealsR/reveals_inputs.csv", row.names=FALSE)
+write.csv(reveals_inputs, "data/reveals_input/params.csv", row.names=FALSE)
 
-# read in lake size, and only keep large lakes
-# lake_size = read.csv('data/midwest_lake_areas.csv')
-# lake_size2 = read.csv('data/neotoma_and_GNIS.csv') 
-lake_size = read.csv('data/areas_with_datasetID.csv')
-lake_size = lake_size[!duplicated(lake_size$DatasetID),]
-
-lake_dists = lake_size$AREAHA[which(!is.na(lake_size$AREAHA))]
+##################################################################################################################################################
+## run reveals
+##################################################################################################################################################
 
 veg_pred = data.frame(id=numeric(0), 
                       x=numeric(0), 
@@ -155,40 +151,24 @@ veg_pred = data.frame(id=numeric(0),
                       q90sim=numeric(0), 
                       sdsim=numeric(0))
 
-# 
-# id = 29
-ids = unique(meta_pol$id)
+ids = unique(pollen_trans$dataset)
+pol_dat = pollen_trans
 
 for (i in 1:length(ids)){
   
   print(i)
   id = ids[i]
   
-  counts_site = data.frame(meta_pol$age[which(meta_pol$id == id)]*100, y[which(meta_pol$id == id), ])
+  counts_site = data.frame(pol_dat[which(pol_dat$dataset == id), 'age'], pol_dat[which(pol_dat$dataset == id),which(toupper(colnames(pol_dat)) %in% taxa)])
   colnames(counts_site) = c('ages', taxa)
   counts_site = counts_site[which(rowSums(counts_site[,2:ncol(counts_site)])!=0),]
   
-  coords_site = data.frame(meta_pol[which(meta_pol$id == id), c('id', 'x', 'y')][1,])
+  coords_site = data.frame(pol_dat[which(pol_dat$dataset == id), c('dataset', 'long', 'lat', 'lake_size')][1,])
   rownames(coords_site) = NULL
   
   # prob don't need this step - fix later
-  write.csv(counts_site, 'revealsR/reveals_test.csv', row.names=FALSE)
-  
-  if (!any(lake_size$DatasetID == id)){
-    print("Lake not in lake area file. Skipping reconstruction.")
-    next
-  } else if (is.na(lake_size$AREAHA[lake_size$DatasetID == id]) & is.na(lake_size$Area[lake_size$DatasetID == id])) {
-    print("Lake area missing. Skipping reconstruction.")
-    next
-  }
-  
-  # in HA; convert to radius in m
-  # pi * r * r
-  if (!is.na(lake_size$AREAHA[lake_size$DatasetID == id])){
-    lake_rad_site = sqrt(lake_size$AREAHA[which(lake_size$DatasetID == id)]*0.01 / pi)*1000
-  } else {
-    lake_rad_site = sqrt(lake_size$Area[which(lake_size$DatasetID == id)]*0.01 / pi)*1000
-  }
+  write.csv(counts_site, 'data/reveals_input/reveals_input.csv', row.names=FALSE)
+
   # 
   # # cycle through and estimate background veg
   # # # with english csv files
@@ -203,8 +183,8 @@ for (i in 1:length(ids)){
 
   # cycle through and estimate background veg
   # with english csv files
-  a <- REVEALSinR(pollenFile = "revealsR/reveals_test.csv",
-                  pf         = "revealsR/reveals_inputs.csv",
+  a <- REVEALSinR(pollenFile = "data/reveals_input/reveals_input.csv",
+                  pf         = "data/reveals_input/params.csv",
                   dwm        = "lsm unstable",
                   tBasin     = "lake",
                   dBasin     = 2*round(lake_rad_site), # diameter!
@@ -229,6 +209,12 @@ for (i in 1:length(ids)){
   
 }
 
+##################################################################################################################################################
+## run reveals
+##################################################################################################################################################
+
+# how to get the coords for grid cells
+xyFromCell(grid, cell index)
 
 veg_agg = aggregate(meansim~ages+taxon, veg_pred, mean)
 ggplot(data=veg_agg) + geom_point(aes(x=ages, y=meansim, colour=taxon))
