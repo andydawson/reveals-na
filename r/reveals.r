@@ -74,11 +74,16 @@ lake_sizes = lake_sizes[!duplicated(lake_sizes$DatasetID),]
 lake_size = lake_sizes$AREAHA[match(pollen_trans$dataset, lake_sizes$DatasetID)]
 lake_size[which(is.na(lake_size))] = lake_sizes$Area[match(pollen_trans$dataset[which(is.na(lake_size))], lake_sizes$DatasetID)]
 
-library(truncnorm)
-lake_size[which(is.na(lake_size))] = rtruncnorm(length(which(is.na(lake_size))), 
-                                                  a=0, 
-                                                  mean=mean(lake_size, na.rm=TRUE), 
-                                                  sd=sd(lake_size, na.rm=TRUE))
+
+random_lake_size <- function(lake_size){
+  library(truncnorm)
+  lake_radius = rtruncnorm(length(which(is.na(lake_size))),
+                           a=0,
+                           mean=mean(lake_size, na.rm=TRUE),
+                           sd=sd(lake_size, na.rm=TRUE))
+  
+  return(lake_radius)
+}
 
 # in HA; convert to radius in m
 # pi * r * r
@@ -181,13 +186,18 @@ for (i in 1:length(ids)){
   #                 regionCutoff = 100000,
   #                 repeats      = 1000)
 
+  basin_radius = pol_dat[which(pol_dat$dataset == id), c('lake_size')][1]
+  if (is.na(basin_radius)){
+    basin_radius = random_lake_size(lake_size)
+  }
+  
   # cycle through and estimate background veg
   # with english csv files
   a <- REVEALSinR(pollenFile = "data/reveals_input/reveals_input.csv",
                   pf         = "data/reveals_input/params.csv",
                   dwm        = "lsm unstable",
                   tBasin     = "lake",
-                  dBasin     = 2*round(lake_rad_site), # diameter!
+                  dBasin     = 2*round(bason_radius), # diameter!
                   regionCutoff = 100000,
                   repeats      = 1000)
   
