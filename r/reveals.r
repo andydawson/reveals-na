@@ -58,27 +58,62 @@ pol_trans_edited <- read.csv('data/pol_trans_edited.csv')
 pollen_trans <- translate_taxa(pollen_dialect, 
                               pol_trans_edited,
                               id_cols = colnames(pollen_dialect)[1:10])
+colnames(pollen_trans) = tolower(colnames(pollen_trans))
+colnames(pollen_trans)[which(colnames(pollen_trans)=='other hardwood')] = 'other.hardwood'
+colnames(pollen_trans)[which(colnames(pollen_trans)=='other conifer')] = 'other.conifer'
+
+# calibrate radiocarbon years BP ages to calendar years BP
+library(Bchron)
+
+pollen_trans$age_calBP = pollen_trans$age
+idx_rc = which((pollen_trans$date.type == 'Radiocarbon years BP') & (pollen_trans$age >= 71))
+
+print(paste0('Calibrating all ', length(idx_rc), ' radiocarbon ages'))
+
+for (i in 1:length(idx_rc)){
+  print(i)
+  ages = BchronCalibrate(ages   = pollen_trans[idx_rc[i], 'age'], 
+                        ageSds = rep(200, length(idx_rc[i])), 
+                        calCurves = rep('intcal13', length(idx_rc[i])))
+  age_samples = SampleAges(ages)
+  pollen_trans[idx_rc[i],'age_calBP'] = apply(age_samples, 2, quantile, prob=c(0.5))
+  
+}
+
+# make time bins
+# start with: 0.1-0.35k BP, 0.35-0.7k BP, 5.5-6.2k BP
+breaks = c(0.1, 0.35, 0.7, 2.7, 3.2, 5.7, 6.2)
+slice_bins = seq(1, 6)
+slice_labels = c(50, 200, 500, 1500, 3000, 6000)
+# cuts = c(5.7, 6.2)
+
+pollen_trans$slice_bin = cut(pollen_trans$age_calBP, breaks*1000, labels=FALSE)
+colnames(pollen_trans) = tolower(colnames(pollen_trans))
+
+# sum samples within a time bin for each site 
+library(plyr)
+pollen_bin = ddply(pollen_trans, c('dataset', 'lat', 'long', 'lake_size', 'site.name', 'slice_bin'),  function(x) colSums(x[tolower(taxa)]))
 
 # make grid for NA (or ENA)
 source('r/make_grid.R')
-grid <- make_grid(pollen_trans, coord_fun = ~ long + lat, projection = '+init=epsg:4326', resolution = 1)
+grid <- make_grid(pollen_bin, coord_fun = ~ long + lat, projection = '+init=epsg:4326', resolution = 1)
   
-cell_id <- extract(grid, pollen_trans[,c('long', 'lat')])
+cell_id <- extract(grid, pollen_bin[,c('long', 'lat')])
 
-pollen_trans <- data.frame(cell_id, pollen_trans)
+pollen_bin <- data.frame(cell_id, pollen_bin)
 
 # lake sizes
 lake_sizes = read.csv('data/areas_with_datasetID.csv')
 lake_sizes = lake_sizes[!duplicated(lake_sizes$DatasetID),] 
 
-lake_size = lake_sizes$AREAHA[match(pollen_trans$dataset, lake_sizes$DatasetID)]
-lake_size[which(is.na(lake_size))] = lake_sizes$Area[match(pollen_trans$dataset[which(is.na(lake_size))], lake_sizes$DatasetID)]
+lake_size = lake_sizes$AREAHA[match(pollen_bin$dataset, lake_sizes$DatasetID)]
+lake_size[which(is.na(lake_size))] = lake_sizes$Area[match(pollen_bin$dataset[which(is.na(lake_size))], lake_sizes$DatasetID)]
 
 
 random_lake_size <- function(lake_size){
   library(truncnorm)
-  lake_radius = rtruncnorm(length(which(is.na(lake_size))),
-                           a=0,
+  lake_radius = rtruncnorm(1,
+                           a=5,
                            mean=mean(lake_size, na.rm=TRUE),
                            sd=sd(lake_size, na.rm=TRUE))
   
@@ -88,7 +123,7 @@ random_lake_size <- function(lake_size){
 # in HA; convert to radius in m
 # pi * r * r
 lake_size = sqrt(lake_size*0.01 / pi)*1000
-pollen_trans <- data.frame(lake_size, pollen_trans)
+pollen_bin <- data.frame(lake_size, pollen_bin)
 
 
 ##################################################################################################################################################
@@ -142,12 +177,21 @@ write.csv(reveals_inputs, "data/reveals_input/params.csv", row.names=FALSE)
 ##################################################################################################################################################
 ## run reveals
 ##################################################################################################################################################
+# # start with only one slice
+# slice = 6
+# # pol_dat = pollen_bin[which(pollen_bin$slice_bin == 6),]
+# ids     = unique(pol_dat$dataset)
+
+pollen_bin = pollen_bin[which(!is.na(pollen_bin$slice_bin)),]
+
+ids = unique(pollen_bin$dataset)
+pol_dat = pollen_bin
 
 veg_pred = data.frame(id=numeric(0), 
-                      x=numeric(0), 
-                      y=numeric(0), 
-                      idx_veg = numeric(0),
-                      radius=numeric(0),
+                      long=numeric(0), 
+                      lat=numeric(0), 
+                      cell_id = numeric(0),
+                      basin_radius=numeric(0),
                       ages=numeric(0), 
                       taxon=character(0), 
                       meansim=numeric(0), 
@@ -156,19 +200,23 @@ veg_pred = data.frame(id=numeric(0),
                       q90sim=numeric(0), 
                       sdsim=numeric(0))
 
-ids = unique(pollen_trans$dataset)
-pol_dat = pollen_trans
 
 for (i in 1:length(ids)){
   
   print(i)
   id = ids[i]
   
-  counts_site = data.frame(pol_dat[which(pol_dat$dataset == id), 'age'], pol_dat[which(pol_dat$dataset == id),which(toupper(colnames(pol_dat)) %in% taxa)])
+  counts_site = data.frame(ages=slice_labels[pol_dat[which(pol_dat$dataset == id),'slice_bin']], 
+                           pol_dat[which(pol_dat$dataset == id),which(colnames(pol_dat) %in% tolower(taxa))])
   colnames(counts_site) = c('ages', taxa)
-  counts_site = counts_site[which(rowSums(counts_site[,2:ncol(counts_site)])!=0),]
+  # counts_site = counts_site[which(rowSums(counts_site[,2:ncol(counts_site)])!=0),]
   
-  coords_site = data.frame(pol_dat[which(pol_dat$dataset == id), c('dataset', 'long', 'lat', 'lake_size')][1,])
+  basin_radius = pol_dat[which(pol_dat$dataset == id), c('lake_size')][1]
+  if (is.na(basin_radius)){
+    basin_radius = random_lake_size(lake_size)
+  }
+  
+  coords_site = data.frame(pol_dat[which(pol_dat$dataset == id), c('dataset', 'long', 'lat', 'cell_id')][1,], basin_radius)
   rownames(coords_site) = NULL
   
   # prob don't need this step - fix later
@@ -186,18 +234,16 @@ for (i in 1:length(ids)){
   #                 regionCutoff = 100000,
   #                 repeats      = 1000)
 
-  basin_radius = pol_dat[which(pol_dat$dataset == id), c('lake_size')][1]
-  if (is.na(basin_radius)){
-    basin_radius = random_lake_size(lake_size)
-  }
+
   
   # cycle through and estimate background veg
   # with english csv files
   a <- REVEALSinR(pollenFile = "data/reveals_input/reveals_input.csv",
                   pf         = "data/reveals_input/params.csv",
-                  dwm        = "lsm unstable",
+                  filetype   = "csv",
+                  dwm        = "gpm neutral",
                   tBasin     = "lake",
-                  dBasin     = 2*round(bason_radius), # diameter!
+                  dBasin     = 2*round(basin_radius), # diameter!
                   regionCutoff = 100000,
                   repeats      = 1000)
   
@@ -215,12 +261,14 @@ for (i in 1:length(ids)){
     geom_errorbar(aes(x=ages, ymin=q10sim, ymax=q90sim, colour=taxon), width=1.5) +
     theme_bw()
   
-  veg_pred = rbind(veg_pred, data.frame(coords_site, idx_veg=idx_cores[i], radius=lake_rad_site, veg_cast))
+  veg_pred = rbind(veg_pred, data.frame(coords_site, veg_cast))
   
 }
 
+saveRDS(veg_pred, 'data/cache/veg_pred.RDS')
+
 ##################################################################################################################################################
-## run reveals
+## process output
 ##################################################################################################################################################
 
 # how to get the coords for grid cells
