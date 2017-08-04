@@ -21,7 +21,7 @@ ena <- TRUE
 if(!'na_downloads.rds' %in% list.files('data/cache/')) {
   canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
   usa    <- get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
-  na_pollen <- bind(canada, usa)
+  na_pollen <- neotoma::bind(canada, usa)
 
   saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
 } else {
@@ -52,15 +52,16 @@ pollen_dialect <- compile_downloads(ena_pollen)
 # generate_tables(na_pollen, output = 'data/pol_trans.csv')
 
 # for now
-pol_trans_edited <- read.csv('data/pol_trans_edited.csv')
+pol_trans_edited <- read.csv('data/pol_trans_edited_LC6K.csv', stringsAsFactors=FALSE)
+taxa = sort(unique(pol_trans_edited[which(!is.na(pol_trans_edited$match)),'match']))
 
 # translate taxa
 pollen_trans <- translate_taxa(pollen_dialect, 
                               pol_trans_edited,
                               id_cols = colnames(pollen_dialect)[1:10])
 colnames(pollen_trans) = tolower(colnames(pollen_trans))
-colnames(pollen_trans)[which(colnames(pollen_trans)=='other hardwood')] = 'other.hardwood'
-colnames(pollen_trans)[which(colnames(pollen_trans)=='other conifer')] = 'other.conifer'
+# colnames(pollen_trans)[which(colnames(pollen_trans)=='other hardwood')] = 'other.hardwood'
+# colnames(pollen_trans)[which(colnames(pollen_trans)=='other conifer')] = 'other.conifer'
 
 # calibrate radiocarbon years BP ages to calendar years BP
 library(Bchron)
@@ -89,10 +90,12 @@ slice_labels = c(50, 200, 500, 1500, 3000, 6000)
 
 pollen_trans$slice_bin = cut(pollen_trans$age_calBP, breaks*1000, labels=FALSE)
 colnames(pollen_trans) = tolower(colnames(pollen_trans))
+pollen_trans = pollen_trans[which(!is.na(pollen_trans$slice_bin)), ]
 
 # sum samples within a time bin for each site 
 library(plyr)
-pollen_bin = ddply(pollen_trans, c('dataset', 'lat', 'long', 'lake_size', 'site.name', 'slice_bin'),  function(x) colSums(x[tolower(taxa)]))
+pollen_bin = ddply(pollen_trans, c('dataset', 'lat', 'long', 'site.name', 'slice_bin'),  
+                   function(x) colSums(x[tolower(taxa)]))
 
 # make grid for NA (or ENA)
 source('r/make_grid.R')
@@ -101,6 +104,10 @@ grid <- make_grid(pollen_bin, coord_fun = ~ long + lat, projection = '+init=epsg
 cell_id <- extract(grid, pollen_bin[,c('long', 'lat')])
 
 pollen_bin <- data.frame(cell_id, pollen_bin)
+
+# # remove other classes for now
+# pollen_bin <- pollen_bin[,which(!(colnames(pollen_bin) %in% c('other.hardwood', 'other.conifer')))]
+# taxa <- taxa[which(!(taxa %in% c('Other hardwood', 'Other conifer')))]
 
 # lake sizes
 lake_sizes = read.csv('data/areas_with_datasetID.csv')
@@ -129,42 +136,52 @@ pollen_bin <- data.frame(lake_size, pollen_bin)
 ##################################################################################################################################################
 ## read in and prep ppes and svs
 ##################################################################################################################################################
+ppes = readRDS('data/PPEs_agg.RDS')
+ppes = ppes[which(ppes$taxon %in% taxa),]
 
-# read in PPEs
-ppes = read.csv('data/ppes_v2.csv', sep=',', header=TRUE, stringsAsFactors=FALSE)
-# ppes$taxon[which(ppes$taxon == "OTHER.CONIFER")]  = "FIR"
-# ppes$taxon[which(ppes$taxon == "OTHER.HARDWOOD")] = "OTHER HARDWOOD"
+ppes[which(ppes$error == 0),'error'] = 0.01
 
-# think carefully about how to rescale these
-maple_rescale = mean(ppes[which((ppes$taxon=='MAPLE')&(ppes$continent == 'North America')&(ppes$tag != 'calcote')),'ppe'])
-ppes[which(ppes$tag == 'calcote'),'ppe'] = ppes[which(ppes$tag == 'calcote'),'ppe']*0.61
+# ###############################################################################################################################
+# # read in PPEs
+# ppes = read.csv('data/ppes_v2.csv', sep=',', header=TRUE, stringsAsFactors=FALSE)
+# # ppes$taxon[which(ppes$taxon == "OTHER.CONIFER")]  = "FIR"
+# # ppes$taxon[which(ppes$taxon == "OTHER.HARDWOOD")] = "OTHER HARDWOOD"
+# 
+# # think carefully about how to rescale these
+# maple_rescale = mean(ppes[which((ppes$taxon=='MAPLE')&(ppes$continent == 'North America')&(ppes$tag != 'calcote')),'ppe'])
+# ppes[which(ppes$tag == 'calcote'),'ppe'] = ppes[which(ppes$tag == 'calcote'),'ppe']*0.61
+# 
+# ppes_agg = aggregate(ppe ~ taxon + continent, ppes, function(x) quantile(x, c(0.05, 0.5, 0.95)))
+# ppes_sd = aggregate(ppe ~ taxon + continent, ppes, function(x) sd(x))
+# ppes_sd[which(is.na(ppes_sd$ppe)), 'ppe'] = 0.01
+# 
+# ppes_agg_NA = subset(ppes_agg, continent == 'North America')
+# 
+# ggplot(data=ppes_agg_NA) + geom_point(aes(x=ppe[,2], y=reorder(taxon, ppe[,2])))
+# 
+# taxa = unique(ppes_agg_NA$taxon)
+# 
+# # # read in STEPPS PPEs
+# # ppe_stepps = readRDS('data/ppe_post.RDS')
+# # # ppe_stepps = readRDS('data/ppe_stepps.RDS')
+# # ppe_stepps_ref = t(apply(ppe_stepps, 1, function(x) x/x[10]))
+# # ppe_stepps_stat  = data.frame(taxa, t(apply(ppe_stepps_ref, 2, function(x) c(mean(x), sd(x)))))
 
-ppes_agg = aggregate(ppe ~ taxon + continent, ppes, function(x) quantile(x, c(0.05, 0.5, 0.95)))
-ppes_sd = aggregate(ppe ~ taxon + continent, ppes, function(x) sd(x))
-ppes_sd[which(is.na(ppes_sd$ppe)), 'ppe'] = 0.01
-
-ppes_agg_NA = subset(ppes_agg, continent == 'North America')
-
-ggplot(data=ppes_agg_NA) + geom_point(aes(x=ppe[,2], y=reorder(taxon, ppe[,2])))
-
-taxa = unique(ppes_agg_NA$taxon)
-
-# # read in STEPPS PPEs
-# ppe_stepps = readRDS('data/ppe_post.RDS')
-# # ppe_stepps = readRDS('data/ppe_stepps.RDS')
-# ppe_stepps_ref = t(apply(ppe_stepps, 1, function(x) x/x[10]))
-# ppe_stepps_stat  = data.frame(taxa, t(apply(ppe_stepps_ref, 2, function(x) c(mean(x), sd(x)))))
-
-# read in SVs
-svs = read.csv('data/svs_meta3.csv', sep=',', header=TRUE, stringsAsFactors=FALSE)
+###############################################################################################################################
+## read in SVs
+svs = read.csv('data/svs_LC6K.csv', sep=',', header=TRUE, stringsAsFactors=FALSE)
+svs[which(is.na(svs$sv)), 'sv'] = 0.01
 svs_agg = aggregate(sv ~ taxon, svs, median)
 
-# construct data frame of reveals inputs
+svs_agg = svs_agg[which(svs_agg$taxon %in% taxa), ]
+
+## construct param input data frame
 reveals_inputs = data.frame(species=taxa,
                             fallspeed=svs_agg$sv[match(svs_agg$taxon, taxa)],
-                            PPEs=ppes_agg_NA$ppe[,2],
-                            PPE.errors=ppes_agg_NA$ppe[,2][match(ppes_agg_NA$taxon, taxa)])
+                            PPEs=ppes$ppe_scaled,
+                            PPE.errors=ppes$error)
 rownames(reveals_inputs) = NULL
+
 
 # # construct data frame of reveals inputs
 # reveals_inputs = data.frame(species=taxa, 
@@ -182,7 +199,7 @@ write.csv(reveals_inputs, "data/reveals_input/params.csv", row.names=FALSE)
 # # pol_dat = pollen_bin[which(pollen_bin$slice_bin == 6),]
 # ids     = unique(pol_dat$dataset)
 
-pollen_bin = pollen_bin[which(!is.na(pollen_bin$slice_bin)),]
+# pollen_bin = pollen_bin[which(!is.na(pollen_bin$slice_bin)),]
 
 ids = unique(pollen_bin$dataset)
 pol_dat = pollen_bin
@@ -248,18 +265,18 @@ for (i in 1:length(ids)){
                   repeats      = 1000)
   
   veg = melt(a, id.vars=c('Pollen.file', 'Parameter.file', 'Distance.weighting', 'Basin.type', 'ages'))
-  veg$variable = gsub('OTHER.', 'OTHER_', veg$variable)
+  # veg$variable = gsub('OTHER.', 'OTHER_', veg$variable)
   
   veg$taxon = unlist(lapply(veg$variable, function(x) unlist(strsplit(as.character(x), ".", fixed=TRUE))[1]))
-  veg$type = unlist(lapply(veg$variable, function(x) unlist(strsplit(as.character(x), ".", fixed=TRUE))[2]))
+  veg$type  = unlist(lapply(veg$variable, function(x) unlist(strsplit(as.character(x), ".", fixed=TRUE))[2]))
   
   veg_cast = dcast(veg, ages + taxon ~ type)
   
-  ggplot(data=veg_cast) + 
-    geom_line(aes(x=ages, y=mediansim, colour=taxon)) + 
-    geom_point(aes(x=ages, y=mediansim, colour=taxon)) + 
-    geom_errorbar(aes(x=ages, ymin=q10sim, ymax=q90sim, colour=taxon), width=1.5) +
-    theme_bw()
+  # ggplot(data=veg_cast) + 
+  #   geom_line(aes(x=ages, y=mediansim, colour=taxon)) + 
+  #   geom_point(aes(x=ages, y=mediansim, colour=taxon)) + 
+  #   geom_errorbar(aes(x=ages, ymin=q10sim, ymax=q90sim, colour=taxon), width=1.5) +
+  #   theme_bw()
   
   veg_pred = rbind(veg_pred, data.frame(coords_site, veg_cast))
   
@@ -270,19 +287,18 @@ saveRDS(veg_pred, 'data/cache/veg_pred.RDS')
 ##################################################################################################################################################
 ## process output
 ##################################################################################################################################################
+library(maptools)
+library(fields)
 
 # how to get the coords for grid cells
-xyFromCell(grid, cell index)
-
-veg_agg = aggregate(meansim~ages+taxon, veg_pred, mean)
-ggplot(data=veg_agg) + geom_point(aes(x=ages, y=meansim, colour=taxon))
-
-library(maptools)
+coords = xyFromCell(grid, veg_pred$cell_id)
+veg_pred = cbind(coords, veg_pred)
 
 us.shp <- readShapeLines('data/map_data/us_alb.shp',
                          proj4string=CRS('+init=epsg:3175'))
 us.shp@data$id <- rownames(us.shp@data)
-us.fort <- fortify(us.shp, region='id') 
+us.shp.ll <- spTransform(us.shp, CRS("+proj=longlat +datum=WGS84"))
+us.fort <- fortify(us.shp.ll, region='id') 
 
 
 add_map_albers <- function(plot_obj, map_data=us.fort, limits){
@@ -310,6 +326,30 @@ get_limits <- function(centers){
 }  
 
 limits = get_limits(centers_pls)
+
+
+veg_grid = aggregate(mediansim ~ taxon + ages + cell_id + x+ y, veg_pred, sum)
+
+veg_cast = dcast(veg_grid, cell_id + x + y + ages ~ taxon, value.var='mediansim')
+veg_cast[,5:ncol(veg_cast)] = t(apply(veg_cast[,5:ncol(veg_cast)], 1, function(x) x/sum(x)))
+
+veg_grid = melt(veg_cast, id.vars=c('cell_id', 'x', 'y', 'ages'))
+
+veg_sub = subset(veg_grid, ages=50)
+p <- ggplot(data=veg_sub)
+p <- p + geom_tile(aes(x=x, y=y, fill=value), data=veg_grid) 
+p <- p + scale_fill_gradientn(colours=tim.colors(10))
+# p <- add_map_albers(p, us.shp.ll, limits)+ coord_fixed()
+p <- p + theme_bw()
+p <- p + theme(axis.text = element_blank(),
+               axis.title = element_blank(),
+               axis.ticks = element_blank())
+p <- p + facet_wrap(~variable, ncol=3)
+print(p)
+
+
+###################################################################################################################################
+
 
 library(scatterpie)
 library(fields)
