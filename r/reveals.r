@@ -10,7 +10,7 @@ library(stepps)
 # # load package
 # load('DISQOVER/R/sysdata.rda')
 
-source('DISQOVER/R/main.R')
+source('utils/main.R')
 
 ena <- TRUE
 
