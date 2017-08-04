@@ -10,7 +10,7 @@ library(stepps)
 # # load package
 # load('DISQOVER/R/sysdata.rda')
 
-source('DISQOVER/R/main.R')
+source('utils/main.R')
 
 ena <- TRUE
 
@@ -19,9 +19,9 @@ ena <- TRUE
 ##################################################################################################################################################
 
 if(!'na_downloads.rds' %in% list.files('data/cache/')) {
-  canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
-  usa    <- get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
-  na_pollen <- bind(canada, usa)
+  canada <- get_dataset(gpid='Ontario', datasettype = 'pollen') %>% get_download
+  usa    <- get_dataset(gpid='Quebec', datasettype = 'pollen') %>% get_download
+  na_pollen <- neotoma::bind(canada, usa)
 
   saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
 } else {
