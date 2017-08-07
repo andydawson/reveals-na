@@ -5,12 +5,14 @@ library(reshape2)
 library(ggplot2)
 library(dplyr)
 library(neotoma)
+
+devtools::install_github("PalEON-Project/stepps-cal")
 library(stepps)
 
 # # load package
 # load('DISQOVER/R/sysdata.rda')
 
-source('utils/main.R')
+source('r/utils/main.R')
 
 ena <- TRUE
 
@@ -18,15 +20,15 @@ ena <- TRUE
 ## pull pollen data for NA
 ##################################################################################################################################################
 
-if(!'na_downloads.rds' %in% list.files('data/cache/')) {
-  canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
-  usa    <- get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
-  na_pollen <- neotoma::bind(canada, usa)
-
-  saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
-} else {
-  na_pollen <- readRDS('data/cache/na_downloads.rds')
-}
+# if(!'na_downloads.rds' %in% list.files('data/cache/')) {
+#   canada <- get_dataset(gpid='Canada', datasettype = 'pollen') %>% get_download
+#   usa    <- get_dataset(gpid='United States', datasettype = 'pollen') %>% get_download
+#   na_pollen <- neotoma::bind(canada, usa)
+# 
+#   saveRDS(na_pollen, file = 'data/cache/na_downloads.rds')
+# } else {
+#   na_pollen <- readRDS('data/cache/na_downloads.rds')
+# }
 
 if(!'ena_downloads.rds' %in% list.files('data/cache/')) {
   ena <- get_dataset(loc=c(-100, 40, -60, 60), datasettype = 'pollen') %>% get_download
@@ -300,6 +302,12 @@ us.shp@data$id <- rownames(us.shp@data)
 us.shp.ll <- spTransform(us.shp, CRS("+proj=longlat +datum=WGS84"))
 us.fort <- fortify(us.shp.ll, region='id') 
 
+na_shp <- readShapeLines('data/map_data/na/NA_States_Provinces_Albers.shp',
+                         proj4string=CRS('+init=epsg:3175'))
+na_shp@data$id <- rownames(na_shp@data)
+na_shp_ll <- spTransform(na_shp, CRS("+proj=longlat +datum=WGS84"))
+na_fort <- fortify(na_shp_ll, region='id') 
+
 
 add_map_albers <- function(plot_obj, map_data=us.fort, limits){
   p <- plot_obj + geom_path(data=map_data, aes(x=long, y=lat, group=group),  colour='grey55') + 
@@ -339,6 +347,7 @@ veg_sub = subset(veg_grid, ages=50)
 p <- ggplot(data=veg_sub)
 p <- p + geom_tile(aes(x=x, y=y, fill=value), data=veg_grid) 
 p <- p + scale_fill_gradientn(colours=tim.colors(10))
+p <- p + geom_path(data=na_fort, aes(x=long, y=lat, group=group),  colour='grey55') + 
 # p <- add_map_albers(p, us.shp.ll, limits)+ coord_fixed()
 p <- p + theme_bw()
 p <- p + theme(axis.text = element_blank(),
