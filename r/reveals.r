@@ -296,45 +296,12 @@ library(fields)
 coords = xyFromCell(grid, veg_pred$cell_id)
 veg_pred = cbind(coords, veg_pred)
 
-us.shp <- readShapeLines('data/map_data/us_alb.shp',
-                         proj4string=CRS('+init=epsg:3175'))
-us.shp@data$id <- rownames(us.shp@data)
-us.shp.ll <- spTransform(us.shp, CRS("+proj=longlat +datum=WGS84"))
-us.fort <- fortify(us.shp.ll, region='id') 
-
 na_shp <- readShapeLines('data/map_data/na/NA_States_Provinces_Albers.shp',
                          proj4string=CRS('+init=epsg:3175'))
 na_shp@data$id <- rownames(na_shp@data)
-na_shp_ll <- spTransform(na_shp, CRS("+proj=longlat +datum=WGS84"))
+# na_shp_ll <- spTransform(na_shp, CRS("+proj=longlat +datum=WGS84"))
+na_shp_ll <- spTransform(na_shp, CRS("+init=epsg:4326"))
 na_fort <- fortify(na_shp_ll, region='id') 
-
-
-add_map_albers <- function(plot_obj, map_data=us.fort, limits){
-  p <- plot_obj + geom_path(data=map_data, aes(x=long, y=lat, group=group),  colour='grey55') + 
-    #     scale_x_continuous(limits = c(min(umw.coord$x, na.rm=TRUE), max(umw.coord$x, na.rm=TRUE))) +
-    #     scale_y_continuous(limits = c(min(umw.coord$y, na.rm=TRUE), max(umw.coord$y, na.rm=TRUE)))#, colour = "black", size = 1, fill = "white", aes(x=long, y=lat, group = group))
-    # #   
-    #     scale_x_continuous(limits = c(min(dat[,1], na.rm=TRUE), max(dat[,1], na.rm=TRUE))) +
-    #     scale_y_continuous(limits = c(min(dat[,2], na.rm=TRUE), max(dat[,2], na.rm=TRUE)))
-    scale_x_continuous(limits = limits$xlims*1000000) +
-    scale_y_continuous(limits = limits$ylims*1000000) #+ coord_map("albers")
-  return(p)
-  
-}
-
-
-get_limits <- function(centers){
-  xlo = min(centers[,1])
-  xhi = max(centers[,1])
-  
-  ylo = min(centers[,2])
-  yhi = max(centers[,2])
-  
-  return(list(xlims=c(xlo,xhi),ylims=c(ylo, yhi)))
-}  
-
-limits = get_limits(centers_pls)
-
 
 veg_grid = aggregate(mediansim ~ taxon + ages + cell_id + x+ y, veg_pred, sum)
 
@@ -343,19 +310,59 @@ veg_cast[,5:ncol(veg_cast)] = t(apply(veg_cast[,5:ncol(veg_cast)], 1, function(x
 
 veg_grid = melt(veg_cast, id.vars=c('cell_id', 'x', 'y', 'ages'))
 
-veg_sub = subset(veg_grid, ages=50)
+saveRDS(veg_grid, 'data/cache/veg_grid.RDS')
+
+latlimits  <- c(40, 60) 
+longlimits <- c(-100, -60) 
+
+# c(-100, 40, -60, 60)
+
+# # make time bins
+# # start with: 0.1-0.35k BP, 0.35-0.7k BP, 5.5-6.2k BP
+# breaks = c(0.1, 0.35, 0.7, 2.7, 3.2, 5.7, 6.2)
+# slice_bins = seq(1, 6)
+# slice_labels = c(50, 200, 500, 1500, 3000, 6000)
+
+nslices = length(slice_labels)
+
+pdf('figures/reveals_taxon_slices.pdf')
+for (i in 1:nslices){
+  
+  age = slice_labels[i]
+  veg_sub = veg_grid[which(veg_grid$ages==age),]
+  
+  p <- ggplot(data=veg_sub)
+  p <- p + geom_tile(aes(x=x, y=y, fill=value), data=veg_grid)
+  p <- p + scale_fill_gradientn(colours=tim.colors(10))
+  p <- p + geom_path(data=na_fort, aes(x=long, y=lat, group=group),  colour='grey55')
+  # p <- add_map_albers(p, us.shp.ll, limits)+ coord_fixed()
+  p <- p + theme_bw()
+  p <- p + theme(axis.text = element_blank(),
+                 axis.title = element_blank(),
+                 axis.ticks = element_blank())
+  p <- p + facet_wrap(~variable, ncol=3)
+  p <- p + coord_cartesian(xlim = longlimits, ylim = latlimits)
+  p <- p + ggtitle(paste0(age, ' YBP slice'))
+  print(p)
+  # ggsave('figures/reveals_taxon_50.pdf')
+}
+dev.off()
+
+
+veg_sub = veg_grid[which((veg_grid$ages==age)&(veg_grid$variable == 'Larch')),]
+
 p <- ggplot(data=veg_sub)
-p <- p + geom_tile(aes(x=x, y=y, fill=value), data=veg_grid) 
+p <- p + geom_tile(aes(x=x, y=y, fill=value), data=veg_grid)
 p <- p + scale_fill_gradientn(colours=tim.colors(10))
-p <- p + geom_path(data=na_fort, aes(x=long, y=lat, group=group),  colour='grey55') + 
+p <- p + geom_path(data=na_fort, aes(x=long, y=lat, group=group),  colour='grey55')
 # p <- add_map_albers(p, us.shp.ll, limits)+ coord_fixed()
 p <- p + theme_bw()
 p <- p + theme(axis.text = element_blank(),
                axis.title = element_blank(),
                axis.ticks = element_blank())
-p <- p + facet_wrap(~variable, ncol=3)
+p <- p + coord_cartesian(xlim = longlimits, ylim = latlimits)
 print(p)
-
+ggsave('figures/larch.pdf')
 
 ###################################################################################################################################
 
